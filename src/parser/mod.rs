@@ -18,33 +18,13 @@ use std::collections::HashMap;
 use std::mem;
 use strings;
 use typed_arena::Arena;
+use tendril::Tendril;
+use tendril::fmt::UTF8;
 
 const TAB_STOP: usize = 4;
 const CODE_INDENT: usize = 4;
 pub const MAXBACKTICKS: usize = 80;
 pub const MAX_LINK_LABEL_LENGTH: usize = 1000;
-
-/// Parse a Markdown document to an AST.
-///
-/// See the documentation of the crate root for an example.
-pub fn parse_document<'a>(arena: &'a Arena<AstNode<'a>>,
-                          buffer: &str,
-                          options: &ComrakOptions)
-                          -> &'a AstNode<'a> {
-    let root: &'a AstNode<'a> = arena.alloc(Node::new(RefCell::new(Ast {
-                                                                       value: NodeValue::Document,
-                                                                       content: String::new(),
-                                                                       start_line: 0,
-                                                                       start_column: 0,
-                                                                       end_line: 0,
-                                                                       end_column: 0,
-                                                                       open: true,
-                                                                       last_line_blank: false,
-                                                                   })));
-    let mut parser = Parser::new(arena, root, options);
-    parser.feed(buffer, true);
-    parser.finish()
-}
 
 pub struct Parser<'a, 'o> {
     arena: &'a Arena<AstNode<'a>>,
@@ -60,7 +40,7 @@ pub struct Parser<'a, 'o> {
     blank: bool,
     partially_consumed_tab: bool,
     last_line_length: usize,
-    linebuf: String,
+    linebuf: Tendril<UTF8>,
     last_buffer_ended_with_cr: bool,
     options: &'o ComrakOptions,
 }
@@ -200,8 +180,8 @@ pub struct ComrakOptions {
 
 #[derive(Clone)]
 pub struct Reference {
-    pub url: String,
-    pub title: String,
+    pub url: Tendril<UTF8>,
+    pub title: Tendril<UTF8>,
 }
 
 impl<'a, 'o> Parser<'a, 'o> {
@@ -223,13 +203,13 @@ impl<'a, 'o> Parser<'a, 'o> {
             blank: false,
             partially_consumed_tab: false,
             last_line_length: 0,
-            linebuf: String::with_capacity(80),
+            linebuf: Tendril::new(),
             last_buffer_ended_with_cr: false,
             options: options,
         }
     }
 
-    pub fn feed(&mut self, s: &str, eof: bool) {
+    pub fn feed(&mut self, s: Tendril<UTF8>, eof: bool) {
         let mut i = 0;
         let buffer = s.as_bytes();
         let sz = buffer.len();
@@ -259,18 +239,18 @@ impl<'a, 'o> Parser<'a, 'o> {
 
             if process {
                 if !self.linebuf.is_empty() {
-                    self.linebuf += &s[i..eol];
-                    let linebuf = mem::replace(&mut self.linebuf, String::with_capacity(80));
-                    self.process_line(&linebuf);
+                    self.linebuf.push_tendril(&s.subtendril(i as u32, (eol - i) as u32));
+                    let linebuf = mem::replace(&mut self.linebuf, Tendril::new());
+                    self.process_line(linebuf);
                 } else {
-                    self.process_line(&s[i..eol]);
+                    self.process_line(s.subtendril(i as u32, (eol - i) as u32));
                 }
             } else if eol < sz && buffer[eol] == b'\0' {
-                self.linebuf += &s[i..eol];
-                self.linebuf.push('\u{fffd}');
+                self.linebuf.push_tendril(&s.subtendril(i as u32, (eol - i) as u32));
+                self.linebuf.push_char('\u{fffd}');
                 eol += 1;
             } else {
-                self.linebuf += &s[i..eol];
+                self.linebuf.push_tendril(&s.subtendril(i as u32, (eol - i) as u32));
             }
 
             i = eol;
@@ -286,7 +266,7 @@ impl<'a, 'o> Parser<'a, 'o> {
         }
     }
 
-    fn find_first_nonspace(&mut self, line: &mut String) {
+    fn find_first_nonspace(&mut self, line: &Tendril<UTF8>) {
         self.first_nonspace = self.offset;
         self.first_nonspace_column = self.column;
         let mut chars_to_tab = TAB_STOP - (self.column % TAB_STOP);
@@ -318,10 +298,9 @@ impl<'a, 'o> Parser<'a, 'o> {
                      strings::is_line_end_char(line.as_bytes()[self.first_nonspace]);
     }
 
-    fn process_line(&mut self, buffer: &str) {
-        let mut line: String = buffer.into();
+    fn process_line(&mut self, mut line: Tendril<UTF8>) {
         if line.is_empty() || !strings::is_line_end_char(*line.as_bytes().last().unwrap()) {
-            line.push('\n');
+            line.push_char('\n');
         }
 
         self.offset = 0;
@@ -336,13 +315,13 @@ impl<'a, 'o> Parser<'a, 'o> {
         self.line_number += 1;
 
         let mut all_matched = true;
-        if let Some(last_matched_container) = self.check_open_blocks(&mut line, &mut all_matched) {
+        if let Some(last_matched_container) = self.check_open_blocks(&line, &mut all_matched) {
             let mut container = last_matched_container;
             let current = self.current;
-            self.open_new_blocks(&mut container, &mut line, all_matched);
+            self.open_new_blocks(&mut container, &line, all_matched);
 
             if current.same_node(self.current) {
-                self.add_text_to_container(container, last_matched_container, &mut line);
+                self.add_text_to_container(container, last_matched_container, &line);
             }
         }
 
@@ -356,7 +335,7 @@ impl<'a, 'o> Parser<'a, 'o> {
     }
 
     fn check_open_blocks(&mut self,
-                         line: &mut String,
+                         line: &Tendril<UTF8>,
                          all_matched: &mut bool)
                          -> Option<&'a AstNode<'a>> {
         let (new_all_matched, mut container, should_continue) =
@@ -376,7 +355,7 @@ impl<'a, 'o> Parser<'a, 'o> {
 
     fn check_open_blocks_inner(&mut self,
                                mut container: &'a AstNode<'a>,
-                               line: &mut String)
+                               line: &Tendril<UTF8>)
                                -> (bool, &'a AstNode<'a>, bool) {
         let mut should_continue = true;
 
@@ -413,7 +392,7 @@ impl<'a, 'o> Parser<'a, 'o> {
                     }
                 }
                 NodeValue::Table(..) => {
-                    if !table::matches(&line[self.first_nonspace..]) {
+                    if !table::matches(&line.subtendril(self.first_nonspace as u32, line.len32() - self.first_nonspace as u32)) {
                         return (false, container, should_continue);
                     }
                     continue;
@@ -432,7 +411,7 @@ impl<'a, 'o> Parser<'a, 'o> {
 
     fn open_new_blocks(&mut self,
                        container: &mut &'a AstNode<'a>,
-                       line: &mut String,
+                       line: &Tendril<UTF8>,
                        all_matched: bool) {
         let mut matched: usize = 0;
         let mut nl: NodeList = NodeList::default();
@@ -494,8 +473,8 @@ impl<'a, 'o> Parser<'a, 'o> {
                     fence_char: line.as_bytes()[first_nonspace],
                     fence_length: matched,
                     fence_offset: first_nonspace - offset,
-                    info: String::with_capacity(10),
-                    literal: String::with_capacity(80),
+                    info: Tendril::new(),
+                    literal: Tendril::new(),
                 };
                 *container =
                     self.add_child(*container, NodeValue::CodeBlock(ncb), first_nonspace + 1);
@@ -514,7 +493,7 @@ impl<'a, 'o> Parser<'a, 'o> {
                 let offset = self.first_nonspace + 1;
                 let nhb = NodeHtmlBlock {
                     block_type: matched as u8,
-                    literal: String::with_capacity(10),
+                    literal: Tendril::new(),
                 };
 
                 *container = self.add_child(*container, NodeValue::HtmlBlock(nhb), offset);
@@ -603,8 +582,8 @@ impl<'a, 'o> Parser<'a, 'o> {
                     fence_char: 0,
                     fence_length: 0,
                     fence_offset: 0,
-                    info: String::new(),
-                    literal: String::with_capacity(80),
+                    info: Tendril::new(),
+                    literal: Tendril::new(),
                 };
                 let offset = self.offset + 1;
                 *container = self.add_child(*container, NodeValue::CodeBlock(ncb), offset);
@@ -637,7 +616,7 @@ impl<'a, 'o> Parser<'a, 'o> {
         }
     }
 
-    fn advance_offset(&mut self, line: &str, mut count: usize, columns: bool) {
+    fn advance_offset(&mut self, line: &Tendril<UTF8>, mut count: usize, columns: bool) {
         while count > 0 {
             match line.as_bytes()[self.offset] {
                 9 => {
@@ -665,7 +644,7 @@ impl<'a, 'o> Parser<'a, 'o> {
         }
     }
 
-    fn parse_block_quote_prefix(&mut self, line: &mut String) -> bool {
+    fn parse_block_quote_prefix(&mut self, line: &Tendril<UTF8>) -> bool {
         let indent = self.indent;
         if indent <= 3 && line.as_bytes()[self.first_nonspace] == b'>' {
             self.advance_offset(line, indent + 1, true);
@@ -681,7 +660,7 @@ impl<'a, 'o> Parser<'a, 'o> {
     }
 
     fn parse_node_item_prefix(&mut self,
-                              line: &mut String,
+                              line: &Tendril<UTF8>,
                               container: &'a AstNode<'a>,
                               nl: &NodeList)
                               -> bool {
@@ -698,7 +677,7 @@ impl<'a, 'o> Parser<'a, 'o> {
     }
 
     fn parse_code_block_prefix(&mut self,
-                               line: &mut String,
+                               line: &Tendril<UTF8>,
                                container: &'a AstNode<'a>,
                                ast: &mut Ast,
                                should_continue: &mut bool)
@@ -773,7 +752,7 @@ impl<'a, 'o> Parser<'a, 'o> {
     fn add_text_to_container(&mut self,
                              mut container: &'a AstNode<'a>,
                              last_matched_container: &'a AstNode<'a>,
-                             line: &mut String) {
+                             line: &Tendril<UTF8>) {
         self.find_first_nonspace(line);
 
         if self.blank {
@@ -844,14 +823,15 @@ impl<'a, 'o> Parser<'a, 'o> {
                     if self.blank {
                         // do nothing
                     } else if container.data.borrow().value.accepts_lines() {
+                        let mut line = line.clone();
                         if let NodeValue::Heading(ref nh) = container.data.borrow().value {
                             if !nh.setext {
-                                strings::chop_trailing_hashtags(line);
+                                strings::chop_trailing_hashtags(&mut line);
                             }
                         };
                         let count = self.first_nonspace - self.offset;
-                        self.advance_offset(line, count, false);
-                        self.add_line(container, line);
+                        self.advance_offset(&line, count, false);
+                        self.add_line(container, &line);
                     } else {
                         let start_column = self.first_nonspace + 1;
                         container = self.add_child(container, NodeValue::Paragraph, start_column);
@@ -866,25 +846,25 @@ impl<'a, 'o> Parser<'a, 'o> {
         }
     }
 
-    fn add_line(&mut self, node: &'a AstNode<'a>, line: &mut String) {
+    fn add_line(&mut self, node: &'a AstNode<'a>, line: &Tendril<UTF8>) {
         let mut ast = node.data.borrow_mut();
         assert!(ast.open);
         if self.partially_consumed_tab {
             self.offset += 1;
             let chars_to_tab = TAB_STOP - (self.column % TAB_STOP);
             for _ in 0..chars_to_tab {
-                ast.content.push(' ');
+                ast.content.push_char(' ');
             }
         }
         if self.offset < line.len() {
-            ast.content += &line[self.offset..];
+            ast.content.push_tendril(&line.subtendril(self.offset as u32, line.len32() - self.offset as u32));
         }
     }
 
     pub fn finish(&mut self) -> &'a AstNode<'a> {
         if !self.linebuf.is_empty() {
-            let linebuf = mem::replace(&mut self.linebuf, String::new());
-            self.process_line(&linebuf);
+            let linebuf = mem::replace(&mut self.linebuf, Tendril::new());
+            self.process_line(linebuf);
         }
 
         self.finalize_document();
@@ -944,7 +924,9 @@ impl<'a, 'o> Parser<'a, 'o> {
                 while !content.is_empty() && content.as_bytes()[0] == b'[' &&
                       unwrap_into(self.parse_reference_inline(content), &mut pos) {
                     while pos > 0 {
-                        pos -= content.remove(0).len_utf8();
+                        let len = content.chars().next().unwrap().len_utf8();
+                        content.pop_front(len as u32);
+                        pos -= len;
                     }
                 }
                 if strings::is_blank(content) {
@@ -954,7 +936,7 @@ impl<'a, 'o> Parser<'a, 'o> {
             NodeValue::CodeBlock(ref mut ncb) => {
                 if !ncb.fenced {
                     strings::remove_trailing_blank_lines(content);
-                    content.push('\n');
+                    content.push_char('\n');
                 } else {
                     let mut pos = 0;
                     while pos < content.len() {
@@ -965,9 +947,9 @@ impl<'a, 'o> Parser<'a, 'o> {
                     }
                     assert!(pos < content.len());
 
-                    let mut tmp = entity::unescape_html(&content[..pos]);
+                    let mut tmp = Tendril::from(entity::unescape_html(&content[..pos]));
                     strings::trim(&mut tmp);
-                    strings::unescape(&mut tmp);
+                    // strings::unescape(&mut tmp);
                     ncb.info = tmp;
 
                     if content.as_bytes()[pos] == b'\r' {
@@ -978,7 +960,9 @@ impl<'a, 'o> Parser<'a, 'o> {
                     }
 
                     while pos > 0 {
-                        pos -= content.remove(0).len_utf8();
+                        let len = content.chars().next().unwrap().len_utf8();
+                        content.pop_front(len as u32);
+                        pos -= len;
                     }
                 }
                 mem::swap(&mut ncb.literal, content);
@@ -1038,7 +1022,7 @@ impl<'a, 'o> Parser<'a, 'o> {
     fn parse_inlines(&mut self, node: &'a AstNode<'a>) {
         let mut subj = inlines::Subject::new(self.arena,
                                              self.options,
-                                             &node.data.borrow().content,
+                                             node.data.borrow().content.clone(),
                                              &mut self.refmap);
 
         strings::rtrim(&mut subj.input);
@@ -1068,7 +1052,7 @@ impl<'a, 'o> Parser<'a, 'o> {
 
                         match ns.data.borrow().value {
                             NodeValue::Text(ref adj) => {
-                                *root += adj;
+                                root.push_tendril(adj);
                                 ns.detach();
                             }
                             _ => break,
@@ -1091,7 +1075,7 @@ impl<'a, 'o> Parser<'a, 'o> {
         }
     }
 
-    fn postprocess_text_node(&mut self, node: &'a AstNode<'a>, text: &mut String) {
+    fn postprocess_text_node(&mut self, node: &'a AstNode<'a>, text: &mut Tendril<UTF8>) {
         if self.options.ext_tasklist {
             self.process_tasklist(node, text);
         }
@@ -1102,7 +1086,7 @@ impl<'a, 'o> Parser<'a, 'o> {
 
     }
 
-    fn process_tasklist(&mut self, node: &'a AstNode<'a>, text: &mut String) {
+    fn process_tasklist(&mut self, node: &'a AstNode<'a>, text: &mut Tendril<UTF8>) {
         lazy_static! {
             static ref TASKLIST: Regex = Regex::new(r"\A(\s*\[([xX ])\])(?:\z|\s)").unwrap();
         }
@@ -1127,19 +1111,19 @@ impl<'a, 'o> Parser<'a, 'o> {
             _ => return,
         }
 
-        *text = text[end..].to_string();
+        text.pop_front(end as u32);
         let checkbox = inlines::make_inline(self.arena,
                                             NodeValue::HtmlInline((if active {
                                                     "<input type=\"checkbox\" disabled=\"\" checked=\"\" />"
                                                 } else {
                                                     "<input type=\"checkbox\" disabled=\"\" />"
                                                 })
-                                                .to_string()));
+                                                .into()));
         node.insert_before(checkbox);
     }
 
-    fn parse_reference_inline(&mut self, content: &str) -> Option<usize> {
-        let mut subj = inlines::Subject::new(self.arena, self.options, content, &mut self.refmap);
+    fn parse_reference_inline(&mut self, content: &Tendril<UTF8>) -> Option<usize> {
+        let mut subj = inlines::Subject::new(self.arena, self.options, content.clone(), &mut self.refmap);
 
         let mut lab = match subj.link_label() {
                 Some(lab) => if lab.is_empty() { return None } else { lab },
@@ -1192,8 +1176,8 @@ impl<'a, 'o> Parser<'a, 'o> {
             subj.refmap
                 .entry(lab)
                 .or_insert(Reference {
-                               url: strings::clean_url(&url),
-                               title: strings::clean_title(&title),
+                               url: strings::clean_url(&url).into(),
+                               title: strings::clean_title(&title).into(),
                            });
         }
         Some(subj.pos)
@@ -1206,7 +1190,7 @@ enum AddTextResult {
     Otherwise,
 }
 
-fn parse_list_marker(line: &mut String,
+fn parse_list_marker(line: &Tendril<UTF8>,
                      mut pos: usize,
                      interrupts_paragraph: bool)
                      -> Option<(usize, NodeList)> {

@@ -3,10 +3,12 @@ use parser::Parser;
 use scanners;
 use std::cmp::min;
 use strings::trim;
+use tendril::Tendril;
+use tendril::fmt::UTF8;
 
 pub fn try_opening_block<'a, 'o>(parser: &mut Parser<'a, 'o>,
                                  container: &'a AstNode<'a>,
-                                 line: &str)
+                                 line: &Tendril<UTF8>)
                                  -> Option<(&'a AstNode<'a>, bool)> {
     let aligns = match container.data.borrow().value {
         NodeValue::Paragraph => None,
@@ -22,7 +24,7 @@ pub fn try_opening_block<'a, 'o>(parser: &mut Parser<'a, 'o>,
 
 pub fn try_opening_header<'a, 'o>(parser: &mut Parser<'a, 'o>,
                                   container: &'a AstNode<'a>,
-                                  line: &str)
+                                  line: &Tendril<UTF8>)
                                   -> Option<(&'a AstNode<'a>, bool)> {
     if scanners::table_start(&line[parser.first_nonspace..]).is_none() {
         return Some((container, false));
@@ -33,7 +35,7 @@ pub fn try_opening_header<'a, 'o>(parser: &mut Parser<'a, 'o>,
         None => return Some((container, false)),
     };
 
-    let marker_row = row(&line[parser.first_nonspace..]).unwrap();
+    let marker_row = row(&line.subtendril(parser.first_nonspace as u32, line.len32() - parser.first_nonspace as u32)).unwrap();
 
     if header_row.len() != marker_row.len() {
         return Some((container, false));
@@ -73,7 +75,7 @@ pub fn try_opening_header<'a, 'o>(parser: &mut Parser<'a, 'o>,
 pub fn try_opening_row<'a, 'o>(parser: &mut Parser<'a, 'o>,
                                container: &'a AstNode<'a>,
                                alignments: &[TableAlignment],
-                               line: &str)
+                               line: &Tendril<UTF8>)
                                -> Option<(&'a AstNode<'a>, bool)> {
     if parser.blank {
         return None;
@@ -105,7 +107,7 @@ pub fn try_opening_row<'a, 'o>(parser: &mut Parser<'a, 'o>,
     Some((new_row, false))
 }
 
-fn row(string: &str) -> Option<Vec<String>> {
+fn row(string: &Tendril<UTF8>) -> Option<Vec<Tendril<UTF8>>> {
     let len = string.len();
     let mut v = vec![];
     let mut offset = 0;
@@ -120,7 +122,7 @@ fn row(string: &str) -> Option<Vec<String>> {
             .unwrap_or(0);
 
         if cell_matched > 0 || pipe_matched > 0 {
-            let mut cell = unescape_pipes(&string[offset..offset + cell_matched]);
+            let mut cell = unescape_pipes(&string.subtendril(offset as u32, cell_matched as u32));
             trim(&mut cell);
             v.push(cell);
         }
@@ -144,7 +146,7 @@ fn row(string: &str) -> Option<Vec<String>> {
     }
 }
 
-fn unescape_pipes(string: &str) -> String {
+fn unescape_pipes(string: &Tendril<UTF8>) -> Tendril<UTF8> {
     let mut v = String::with_capacity(string.len());
     let mut escaping = false;
 
@@ -163,9 +165,9 @@ fn unescape_pipes(string: &str) -> String {
         v.push('\\');
     }
 
-    v
+    v.into()
 }
 
-pub fn matches(line: &str) -> bool {
+pub fn matches(line: &Tendril<UTF8>) -> bool {
     row(line).is_some()
 }

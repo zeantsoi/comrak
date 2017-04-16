@@ -654,7 +654,7 @@ fn is_autolink<'a>(node: &'a AstNode<'a>, nl: &NodeLink) -> bool {
         real_url = &real_url[7..];
     }
 
-    real_url == link_text
+    real_url == &*link_text
 }
 
 fn table_escape<'a>(node: &'a AstNode<'a>, c: u8) -> bool {

@@ -1,6 +1,8 @@
 use ctype::{ispunct, isspace};
 use entity;
 use parser::AutolinkType;
+use tendril::Tendril;
+use tendril::fmt::UTF8;
 
 pub fn unescape(v: &mut String) {
     let mut r = 0;
@@ -18,24 +20,23 @@ pub fn unescape(v: &mut String) {
     }
 }
 
-pub fn clean_autolink(url: &str, kind: AutolinkType) -> String {
-    let mut url_string = url.to_string();
-    trim(&mut url_string);
+pub fn clean_autolink(mut url: Tendril<UTF8>, kind: AutolinkType) -> Tendril<UTF8> {
+    trim(&mut url);
 
-    if url_string.is_empty() {
-        return url_string;
+    if url.is_empty() {
+        return url;
     }
 
-    let mut buf = String::with_capacity(url_string.len());
+    let mut buf = String::with_capacity(url.len());
     if kind == AutolinkType::Email {
         buf += "mailto:";
     }
 
-    buf += &entity::unescape_html(&url_string);
-    buf
+    buf += &entity::unescape_html(&url);
+    buf.into()
 }
 
-pub fn normalize_whitespace(v: &str) -> String {
+pub fn normalize_whitespace(v: Tendril<UTF8>) -> Tendril<UTF8> {
     let mut last_char_was_space = false;
     let mut r = String::with_capacity(v.len());
 
@@ -51,13 +52,13 @@ pub fn normalize_whitespace(v: &str) -> String {
         }
     }
 
-    r
+    r.into()
 }
 
-pub fn remove_trailing_blank_lines(line: &mut String) {
-    let mut i = line.len() - 1;
+pub fn remove_trailing_blank_lines(line: &mut Tendril<UTF8>) {
+    let mut i = line.len32() - 1;
     loop {
-        let c = line.as_bytes()[i];
+        let c = line.as_bytes()[i as usize];
 
         if c != b' ' && c != b'\t' && !is_line_end_char(c) {
             break;
@@ -71,14 +72,17 @@ pub fn remove_trailing_blank_lines(line: &mut String) {
         i -= 1;
     }
 
-    for i in i..line.len() {
-        let c = line.as_bytes()[i];
+    for i in i..line.len32() {
+        let c = line.as_bytes()[i as usize];
 
         if !is_line_end_char(c) {
             continue;
         }
 
-        line.truncate(i);
+        if i != line.len32() {
+            let len = line.len32();
+            line.pop_back(len - i);
+        }
         break;
     }
 }
@@ -97,7 +101,7 @@ pub fn is_space_or_tab(ch: u8) -> bool {
     }
 }
 
-pub fn chop_trailing_hashtags(line: &mut String) {
+pub fn chop_trailing_hashtags(line: &mut Tendril<UTF8>) {
     rtrim(line);
 
     let orig_n = line.len() - 1;
@@ -111,28 +115,31 @@ pub fn chop_trailing_hashtags(line: &mut String) {
     }
 
     if n != orig_n && is_space_or_tab(line.as_bytes()[n]) {
-        line.truncate(n);
+        if line.len32() != n as u32 {
+            let len = line.len32();
+            line.pop_back(len - n as u32);
+        }
         rtrim(line);
     }
 }
 
-pub fn rtrim(line: &mut String) {
+pub fn rtrim(line: &mut Tendril<UTF8>) {
     let mut len = line.len();
     while len > 0 && isspace(line.as_bytes()[len - 1]) {
-        line.pop();
+        line.pop_back(1);
         len -= 1;
     }
 }
 
-pub fn ltrim(line: &mut String) {
+pub fn ltrim(line: &mut Tendril<UTF8>) {
     let mut len = line.len();
     while len > 0 && isspace(line.as_bytes()[0]) {
-        line.remove(0);
+        line.pop_front(0);
         len -= 1;
     }
 }
 
-pub fn trim(line: &mut String) {
+pub fn trim(line: &mut Tendril<UTF8>) {
     ltrim(line);
     rtrim(line);
 }

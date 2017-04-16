@@ -3,10 +3,12 @@ use nodes::{NodeValue, NodeLink, AstNode};
 use parser::inlines::make_inline;
 use typed_arena::Arena;
 use unicode_categories::UnicodeCategories;
+use tendril::Tendril;
+use tendril::fmt::UTF8;
 
 pub fn process_autolinks<'a>(arena: &'a Arena<AstNode<'a>>,
                              node: &'a AstNode<'a>,
-                             contents: &mut String) {
+                             contents: &mut Tendril<UTF8>) {
     let len = contents.len();
     let mut i = 0;
 
@@ -42,18 +44,21 @@ pub fn process_autolinks<'a>(arena: &'a Arena<AstNode<'a>>,
             i -= reverse;
             node.insert_after(post);
             if i + skip < len {
-                let remain = contents[i + skip..].to_string();
+                let remain = contents.subtendril((i + skip) as u32, contents.len32() - (i + skip) as u32);
                 assert!(!remain.is_empty());
                 post.insert_after(make_inline(arena, NodeValue::Text(remain)));
             }
-            contents.truncate(i);
+            if (i as u32) < contents.len32() {
+                let len = contents.len32();
+                contents.pop_back(len - i as u32);
+            }
             return;
         }
     }
 }
 
 fn www_match<'a>(arena: &'a Arena<AstNode<'a>>,
-                 contents: &str,
+                 contents: &Tendril<UTF8>,
                  i: usize)
                  -> Option<(&'a AstNode<'a>, usize, usize)> {
     lazy_static! {
@@ -86,17 +91,17 @@ fn www_match<'a>(arena: &'a Arena<AstNode<'a>>,
 
     link_end = autolink_delim(&contents[i..], link_end);
 
-    let mut url = "http://".to_string();
-    url += &contents[i..link_end + i];
+    let mut url: Tendril<UTF8> = "http://".into();
+    url.push_tendril(&contents.subtendril(i as u32, link_end as u32));
 
     let inl = make_inline(arena,
                           NodeValue::Link(NodeLink {
                                               url: url,
-                                              title: String::new(),
+                                              title: Tendril::new(),
                                           }));
 
     inl.append(make_inline(arena,
-                           NodeValue::Text(contents[i..link_end + i].to_string())));
+                           NodeValue::Text(contents.subtendril(i as u32, link_end as u32))));
     Some((inl, 0, link_end))
 }
 
@@ -193,7 +198,7 @@ fn autolink_delim(data: &str, mut link_end: usize) -> usize {
 }
 
 fn url_match<'a>(arena: &'a Arena<AstNode<'a>>,
-                 contents: &str,
+                 contents: &Tendril<UTF8>,
                  i: usize)
                  -> Option<(&'a AstNode<'a>, usize, usize)> {
     lazy_static! {
@@ -229,11 +234,11 @@ fn url_match<'a>(arena: &'a Arena<AstNode<'a>>,
 
     link_end = autolink_delim(&contents[i..], link_end);
 
-    let url = contents[i - rewind..i + link_end].to_string();
+    let url = contents.subtendril((i - rewind) as u32, (link_end + rewind) as u32);
     let inl = make_inline(arena,
                           NodeValue::Link(NodeLink {
                                               url: url.clone(),
-                                              title: String::new(),
+                                              title: Tendril::new(),
                                           }));
 
     inl.append(make_inline(arena, NodeValue::Text(url)));
@@ -241,7 +246,7 @@ fn url_match<'a>(arena: &'a Arena<AstNode<'a>>,
 }
 
 fn email_match<'a>(arena: &'a Arena<AstNode<'a>>,
-                   contents: &str,
+                   contents: &Tendril<UTF8>,
                    i: usize)
                    -> Option<(&'a AstNode<'a>, usize, usize)> {
     lazy_static! {
@@ -306,16 +311,16 @@ fn email_match<'a>(arena: &'a Arena<AstNode<'a>>,
 
     link_end = autolink_delim(&contents[i..], link_end);
 
-    let mut url = "mailto:".to_string();
-    url += &contents[i - rewind..link_end + i];
+    let mut url: Tendril<UTF8> = "mailto:".into();
+    url.push_tendril(&contents.subtendril((i - rewind) as u32, (link_end + rewind) as u32));
 
     let inl = make_inline(arena,
                           NodeValue::Link(NodeLink {
                                               url: url,
-                                              title: String::new(),
+                                              title: Tendril::new(),
                                           }));
 
     inl.append(make_inline(arena,
-                           NodeValue::Text(contents[i - rewind..link_end + i].to_string())));
+                           NodeValue::Text(contents.subtendril((i - rewind) as u32, (link_end + rewind) as u32))));
     Some((inl, rewind, rewind + link_end))
 }

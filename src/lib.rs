@@ -81,6 +81,7 @@ extern crate arena_tree;
 extern crate regex;
 #[macro_use]
 extern crate lazy_static;
+extern crate tendril;
 
 mod parser;
 mod scanners;
@@ -97,14 +98,5 @@ mod tests;
 pub use cm::format_document as format_commonmark;
 pub use html::format_document as format_html;
 
-pub use parser::{parse_document, ComrakOptions};
+pub use parser::ComrakOptions;
 use typed_arena::Arena;
-
-/// Render Markdown to HTML.
-///
-/// See the documentation of the crate root for an example.
-pub fn markdown_to_html(md: &str, options: &ComrakOptions) -> String {
-    let arena = Arena::new();
-    let root = parse_document(&arena, md, options);
-    format_html(root, options)
-}

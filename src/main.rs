@@ -23,6 +23,7 @@ extern crate typed_arena;
 extern crate regex;
 #[macro_use]
 extern crate lazy_static;
+extern crate tendril;
 
 mod html;
 mod cm;
@@ -38,6 +39,12 @@ use std::collections::BTreeSet;
 use std::io::Read;
 use std::process;
 use typed_arena::Arena;
+use tendril::Tendril;
+use tendril::stream::{Utf8LossyDecoder, TendrilSink};
+use tendril::fmt::UTF8;
+use nodes::{Ast, AstNode, NodeValue};
+use arena_tree::Node;
+use std::cell::RefCell;
 
 fn main() {
     let matches = clap::App::new("comrak")
@@ -106,22 +113,35 @@ fn main() {
 
     assert!(exts.is_empty());
 
-    let mut s = String::with_capacity(2048);
-
-    match matches.values_of("file") {
-        None => {
-            std::io::stdin().read_to_string(&mut s).unwrap();
-        }
-        Some(fs) => {
-            for f in fs {
-                let mut io = std::fs::File::open(f).unwrap();
-                io.read_to_string(&mut s).unwrap();
-            }
-        }
-    };
-
     let arena = Arena::new();
-    let root = parser::parse_document(&arena, &s, &options);
+    let root = arena.alloc(Node::new(RefCell::new(Ast {
+                                                                       value: NodeValue::Document,
+                                                                       content: Tendril::new(),
+                                                                       start_line: 0,
+                                                                       start_column: 0,
+                                                                       end_line: 0,
+                                                                       end_column: 0,
+                                                                       open: true,
+                                                                       last_line_blank: false,
+                                                                   })));
+
+    let tp = Utf8LossyDecoder::new(TendrilParser {
+        parser: parser::Parser::new(&arena, root, &options),
+    });
+
+    //match matches.values_of("file") {
+        //None => {
+            let root = tp.read_from(&mut std::io::stdin()).unwrap();
+        //}
+        //Some(fs) => {
+            //for f in fs {
+                //let mut io = std::fs::File::open(f).unwrap();
+                //tp.read_from(&mut io);
+            //}
+        //}
+    //};
+
+    // let root = tp.finish();
 
     let formatter = match matches.value_of("format") {
         Some("html") => html::format_document,
@@ -132,4 +152,24 @@ fn main() {
     print!("{}", formatter(root, &options));
 
     process::exit(0);
+}
+
+struct TendrilParser<'a, 'o> {
+    parser: parser::Parser<'a, 'o>,
+}
+
+impl<'a, 'o> TendrilSink<UTF8> for TendrilParser<'a, 'o> {
+    type Output = &'a AstNode<'a>;
+
+    fn process(&mut self, t: Tendril<UTF8>) {
+        self.parser.feed(t, false)
+    }
+
+    fn error(&mut self, desc: std::borrow::Cow<'static, str>) {
+        panic!("nope {}", desc);
+    }
+
+    fn finish(mut self) -> &'a AstNode<'a> {
+        self.parser.finish()
+    }
 }
