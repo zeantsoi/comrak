@@ -1,19 +1,24 @@
 //! The `comrak` binary.
 
-#![deny(missing_docs,
-        missing_debug_implementations,
-	missing_copy_implementations,
-	trivial_casts,
-	trivial_numeric_casts,
-	unsafe_code,
-	unstable_features,
-	unused_import_braces,
-	unused_qualifications)]
+// #![deny(missing_docs,
+//         missing_debug_implementations,
+// 	missing_copy_implementations,
+// 	trivial_casts,
+// 	trivial_numeric_casts,
+// 	unsafe_code,
+// 	unstable_features,
+// 	unused_import_braces,
+// 	unused_qualifications)]
 
 #![cfg_attr(feature = "dev", allow(unstable_features))]
 #![cfg_attr(feature = "dev", feature(plugin))]
 #![cfg_attr(feature = "dev", plugin(clippy))]
 #![allow(unknown_lints, doc_markdown, cyclomatic_complexity)]
+
+// When compiled for the rustc compiler itself we want to make sure that this is
+// an unstable crate.
+#![cfg_attr(rustbuild, feature(staged_api, rustc_private))]
+#![cfg_attr(rustbuild, unstable(feature = "rustc_private", issue = "27812"))]
 
 extern crate entities;
 #[macro_use]
