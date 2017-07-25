@@ -103,6 +103,9 @@ pub enum NodeValue {
 
     /// **Inline**.  An [image](https://github.github.com/gfm/#images).
     Image(NodeLink),
+
+    /// **Inline**.  Underline
+    Underline,
 }
 
 /// Alignment of a single table cell.

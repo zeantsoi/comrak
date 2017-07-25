@@ -345,6 +345,13 @@ impl<'o> HtmlFormatter<'o> {
                     self.s += "</em>";
                 }
             }
+            NodeValue::Underline => {
+                if entering {
+                    self.s += "<u>";
+                } else {
+                    self.s += "</u>";
+                }
+            }
             NodeValue::Strikethrough => {
                 if entering {
                     self.s += "<del>";

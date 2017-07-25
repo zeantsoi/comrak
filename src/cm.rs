@@ -478,11 +478,18 @@ impl<'a, 'o> CommonMarkFormatter<'a, 'o> {
 
                 self.write_all(&[emph_delim]).unwrap();
             }
-            NodeValue::Strikethrough => {
+            NodeValue::Underline => {
                 if entering {
                     write!(self, "~").unwrap();
                 } else {
                     write!(self, "~").unwrap();
+                }
+            }
+            NodeValue::Strikethrough => {
+                if entering {
+                    write!(self, "~~").unwrap();
+                } else {
+                    write!(self, "~~").unwrap();
                 }
             }
             NodeValue::Superscript => {
