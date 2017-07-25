@@ -118,24 +118,6 @@ pub extern fn markdown_to_html(md: &str, options: &ComrakOptions) -> String {
     format_html(root, options)
 }
 
-// #[no_mangle]
-// pub extern fn html(s: *const c_char) -> CString {
-//     let c_str = unsafe {
-//         assert!(!s.is_null());
-
-//         CStr::from_ptr(s)
-//     };
-
-//     let r_str = c_str.to_str().unwrap();
-//     let mut s = String::with_capacity(r_str.len() * 3 / 2);
-//     let arena = Arena::new();
-//     let root = parse_document(&arena, &r_str, &ComrakOptions::default());
-//     s = format_html(root, &ComrakOptions::default());
-//     println!("{}", s);
-//     let c_str = CString::new(s).unwrap();
-//     c_str
-// }
-
 #[no_mangle]
 pub extern fn html(s: *const c_char) -> CString {
     let c_str = unsafe {

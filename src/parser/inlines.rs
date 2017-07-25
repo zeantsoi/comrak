@@ -560,7 +560,11 @@ impl<'a, 'r, 'o, 'd> Subject<'a, 'r, 'o, 'd> {
         let emph = make_inline(
             self.arena,
             if self.options.ext_strikethrough && opener_char == b'~' {
-                NodeValue::Strikethrough
+                if use_delims == 1 {
+                    NodeValue::Underline
+                } else {
+                    NodeValue::Strikethrough
+                }
             } else if self.options.ext_superscript && opener_char == b'^' {
                 NodeValue::Superscript
             } else if use_delims == 1 {

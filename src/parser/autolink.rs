@@ -1,6 +1,7 @@
 use ctype::{isspace, isalpha, isalnum};
 use nodes::{NodeValue, NodeLink, AstNode};
 use parser::inlines::make_inline;
+use regex::{Regex, Captures};
 use typed_arena::Arena;
 use unicode_categories::UnicodeCategories;
 
@@ -247,7 +248,6 @@ fn url_match<'a>(
             title: String::new(),
         }),
     );
-
     inl.append(make_inline(arena, NodeValue::Text(url)));
     Some((inl, rewind, rewind + link_end))
 }
@@ -339,3 +339,67 @@ fn email_match<'a>(
     ));
     Some((inl, rewind, rewind + link_end))
 }
+
+// reddit extensions
+
+pub fn process_redditlinks<'a>(
+    arena: &'a Arena<AstNode<'a>>,
+    node: &'a AstNode<'a>,
+    contents: &mut String,
+) {
+    lazy_static! {
+        static ref RE: Regex = Regex::new(r"(/?(r|u)/)\w+").unwrap();
+    }
+
+    let borrowed_contents = contents.to_string();
+    let matched = RE.find(&borrowed_contents);
+    let mut redditlink = "";
+    let mut redditlink_start = 0;
+    let mut redditlink_end = 0;
+    match matched {
+        Some(rl) => {
+            let m = matched.unwrap();
+            redditlink_start = m.start();
+            redditlink_end = m.end();
+            redditlink = &borrowed_contents[m.start()..redditlink_end]
+        },
+        _ => return
+    }
+
+    let mut with_preceding_slash;
+    let full_redditlink = match redditlink.as_bytes()[0] {
+        b'/' => redditlink,
+        _ => {
+            with_preceding_slash = format!("/{}", redditlink).to_owned();
+            &with_preceding_slash
+        }
+    };
+
+    let owned_redditlink = full_redditlink.to_owned();
+
+    let inl = make_inline(
+        arena,
+        NodeValue::Link(NodeLink {
+            url: owned_redditlink.clone(),
+            title: owned_redditlink.clone(),
+        })
+    );
+
+    inl.append(make_inline(
+        arena,
+        NodeValue::Text(
+            // Use redditlink to respect wheher there's a preceding slash
+            redditlink.to_string()
+        )
+    ));
+
+    node.insert_after(inl);
+    let remain = contents[redditlink_end..].to_string();
+    inl.insert_after(make_inline(arena, NodeValue::Text(remain)));
+
+    contents.truncate(redditlink_start);
+
+    ()
+}
+
+// fn render_redditlink(re: Regex) {}

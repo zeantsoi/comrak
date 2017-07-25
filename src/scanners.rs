@@ -270,3 +270,11 @@ pub fn table_row_end(line: &str) -> Option<usize> {
 
     search(&RE, line)
 }
+
+// extensions by reddit
+pub fn reddit_atx_heading_start(line: &str) -> Option<usize> {
+    lazy_static! {
+        static ref RE: Regex = Regex::new(r"\A(?:#{1,6})").unwrap();
+    }
+    search(&RE, line)
+}
