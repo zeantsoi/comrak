@@ -456,7 +456,7 @@ impl<'a, 'o> CommonMarkFormatter<'a, 'o> {
                 if entering {
                     write!(self, "**").unwrap();
                 } else {
-                    write!(self, "**").unwrap();
+                    write!(self, "**​").unwrap();
                 }
             }
             NodeValue::Emph => {
@@ -482,7 +482,7 @@ impl<'a, 'o> CommonMarkFormatter<'a, 'o> {
                 if entering {
                     write!(self, "~").unwrap();
                 } else {
-                    write!(self, "~").unwrap();
+                    write!(self, "~​").unwrap();
                 }
             }
             NodeValue::Strikethrough => {
@@ -496,7 +496,7 @@ impl<'a, 'o> CommonMarkFormatter<'a, 'o> {
                 if entering {
                     write!(self, "^").unwrap();
                 } else {
-                    write!(self, "^").unwrap();
+                    write!(self, "^​").unwrap();
                 }
             }
             NodeValue::Link(ref nl) => {
